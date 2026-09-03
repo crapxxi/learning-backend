@@ -17,7 +17,7 @@ constexpr int PORT = 4733;
 constexpr int MAX_EVENTS = 1024;
 constexpr int BUF_SIZE = 4096;
 constexpr int MAX_RECORDS = 10000;
-constexpr size_t MAX_KEY_LEN = 64;
+constexpr size_t MAX_KEY_LEN = 31;
 
 struct Connection {
     int fd;
@@ -39,8 +39,8 @@ void modify_write_event(int kq, int fd, bool enable) {
 }
 
 void close_connection(int kq, int fd, std::unordered_map<int, Connection>& clients) {
+    if (clients.erase(fd) == 0) return;
     close(fd);
-    clients.erase(fd);
 }
 
 std::string_view get_next_token(std::string_view& src) {
@@ -94,7 +94,7 @@ std::string process_single_command(std::string_view line, FixedMiniDB& db) {
             return "ERR value is not an integer or out of range\r\n";
 
         try {
-            std::string k(key), v(value);
+            std::string k(key.data(), key.size()), v(value.data(), value.size());
             db.put(k.c_str(), v.c_str(), ttl);
             return "SET OK\r\n";
         } catch (const std::exception&) {
@@ -102,7 +102,8 @@ std::string process_single_command(std::string_view line, FixedMiniDB& db) {
         }
     } else if (cmd == "get" || cmd == "GET") {
         std::string_view key = get_next_token(line);
-        if (key.empty()) return "ERR wrong number of arguments for 'get'\r\n";
+        if (key.empty())
+            return "ERR wrong number of arguments for 'get'\r\n";
 
         if (key.size() > MAX_KEY_LEN)
             return "ERR key is too long\r\n";
@@ -111,7 +112,7 @@ std::string process_single_command(std::string_view line, FixedMiniDB& db) {
             return "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThis is a Redis-like MiniDB server. Use netcat or TCP client.\r\n";
         }
 
-        std::string k(key);
+        std::string k(key.data(), key.size());
         std::string resp = db.get(k.c_str());
         return !resp.empty() ? "GET ${" + resp + "}\r\n" : "GET ${nil}\r\n";
     } else if (cmd == "incr" || cmd == "INCR") {
@@ -135,7 +136,7 @@ std::string process_single_command(std::string_view line, FixedMiniDB& db) {
         }
 
         try {
-            std::string k(key);
+            std::string k(key.data(), key.size());
             int64_t res = db.incr(k.c_str(), delta, ttl_sec);
             return "INCR OK ${" + std::to_string(res) + "}\r\n";
         } catch (const std::exception&) {
@@ -145,7 +146,7 @@ std::string process_single_command(std::string_view line, FixedMiniDB& db) {
         std::string_view key = get_next_token(line);
         if (key.empty()) return "ERR wrong number of arguments for 'del'\r\n";
 
-        std::string k(key);
+        std::string k(key.data(), key.size());
         return db.del(k.c_str()) ? "DEL OK\r\n" : "DEL NOT\r\n";
     } else {
         return "ERR unknown command\r\n";
@@ -301,9 +302,6 @@ int main() {
                 }
                 if (filter == EVFILT_WRITE && (flags & EV_EOF) == 0) {
                     handle_write(fd, kq, clients);
-                }
-                if (flags & EV_EOF) {
-                    close_connection(kq, fd, clients);
                 }
             }
         }

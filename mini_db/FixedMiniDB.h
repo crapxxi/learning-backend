@@ -7,6 +7,7 @@
 #include <chrono>
 #include <stdexcept>
 #include <cstring>
+#include <string>
 #include <shared_mutex>
 #include <array>
 #include <atomic>
@@ -155,7 +156,7 @@ class FixedMiniDB {
             if(current_occupied > max_records_ / 2) eviction_cv_.notify_one();
         }
 
-        const char* get(const char* key) {
+        std::string get(const char* key) {
             int key_hash = hash(key);
             size_t shard = get_shard_index(key_hash);
 
@@ -168,14 +169,14 @@ class FixedMiniDB {
                     if(current->expire_at_ms != 0 && now_ms() >= current->expire_at_ms) {
                         lock.unlock();
                         del(key);
-                        return nullptr;
+                        return {};
                     }
-                    return current->value;
+                    return std::string(current->value);
                 }
                 current = current->next;
             }
 
-            return nullptr;
+            return {};
         }
 
         bool del(const char* key) {
